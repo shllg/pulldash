@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, nativeTheme, Menu, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
 import { resolve, join } from "path";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, watch } from "fs";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -149,6 +149,26 @@ function createWindow(): void {
   });
 }
 
+// Dev-only: reload the renderer when the browser bundle rebuilds, so
+// `build:browser --watch` output is reflected without restarting Electron.
+function setupRendererHotReload(): void {
+  if (!isDev) return;
+
+  const distDir = getDistDir();
+  if (!existsSync(distDir)) return;
+
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  watch(distDir, { recursive: true }, () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        console.log("[Dev] Browser bundle changed — reloading renderer");
+        mainWindow.webContents.reloadIgnoringCache();
+      }
+    }, 200);
+  });
+}
+
 function getAppIcon(): string | undefined {
   if (isDev) {
     const iconPath = resolve(__dirname, "..", "..", "build", "icon.png");
@@ -242,6 +262,7 @@ app.whenReady().then(async () => {
     await startServer();
     createWindow();
     setupAutoUpdater();
+    setupRendererHotReload();
 
     app.on("activate", () => {
       // macOS: re-create window when dock icon clicked

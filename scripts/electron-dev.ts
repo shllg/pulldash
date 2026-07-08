@@ -7,12 +7,33 @@
 import { spawn, type Subprocess } from "bun";
 import { watch } from "fs";
 import { resolve, join } from "path";
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, writeFileSync } from "fs";
 
 const ROOT_DIR = resolve(__dirname, "..");
 const ELECTRON_DIST = join(ROOT_DIR, "dist", "electron");
+const BROWSER_INDEX = join(ROOT_DIR, "dist", "browser", "index.html");
 
 let electronProcess: Subprocess | null = null;
+
+// The browser bundle is built by a separate `build:browser --watch` process
+// (run concurrently). Launching Electron before its first build finishes loads
+// a missing/stale index.html → blank window. Wait for the bundle to exist first.
+async function waitForBrowserBundle(): Promise<void> {
+  if (existsSync(BROWSER_INDEX)) return;
+  console.log("[Dev] Waiting for browser bundle (dist/browser/index.html)...");
+  const start = Date.now();
+  const TIMEOUT_MS = 60_000;
+  while (!existsSync(BROWSER_INDEX)) {
+    if (Date.now() - start > TIMEOUT_MS) {
+      console.warn(
+        "[Dev] Browser bundle not found after 60s — launching anyway"
+      );
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  console.log("[Dev] Browser bundle ready");
+}
 
 async function compileMain(): Promise<boolean> {
   console.log("[Dev] Compiling Electron main process...");
@@ -38,6 +59,14 @@ async function compileMain(): Promise<boolean> {
     }
     return false;
   }
+
+  // Mark the compiled output as CommonJS so Node/Electron doesn't treat the
+  // .js files as ESM (the root package.json has "type": "module"). The prod
+  // build does the same via dist/package.json in build-electron.ts.
+  writeFileSync(
+    join(ELECTRON_DIST, "package.json"),
+    JSON.stringify({ type: "commonjs" }, null, 2)
+  );
 
   console.log("[Dev] Compilation successful");
   return true;
@@ -79,6 +108,9 @@ async function main() {
   if (!success) {
     process.exit(1);
   }
+
+  // Wait for the concurrent browser build before loading the renderer
+  await waitForBrowserBundle();
 
   // Launch Electron
   launchElectron();
