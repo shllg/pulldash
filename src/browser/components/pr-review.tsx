@@ -2319,7 +2319,7 @@ interface InlineCommentFormProps {
   startLine?: number;
 }
 
-const InlineCommentForm = memo(function InlineCommentForm({
+export const InlineCommentForm = memo(function InlineCommentForm({
   line,
   startLine,
 }: InlineCommentFormProps) {
@@ -2474,7 +2474,7 @@ interface CommentThreadProps {
   replyingToCommentId: number | null;
 }
 
-const CommentThread = memo(function CommentThread({
+export const CommentThread = memo(function CommentThread({
   comments,
   focusedCommentId,
   editingCommentId,
@@ -3176,7 +3176,7 @@ interface PendingCommentItemProps {
   isEditing?: boolean;
 }
 
-const PendingCommentItem = memo(function PendingCommentItem({
+export const PendingCommentItem = memo(function PendingCommentItem({
   comment,
   isFocused,
   isEditing,

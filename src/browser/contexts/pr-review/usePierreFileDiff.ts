@@ -8,6 +8,7 @@ import { usePRReviewSelector } from ".";
 interface PierreFileDiffResult {
   fileDiff: FileDiffMetadata | null;
   isLoading: boolean;
+  error: string | null;
 }
 
 /**
@@ -33,6 +34,7 @@ export function usePierreFileDiff(
   const [state, setState] = useState<PierreFileDiffResult>({
     fileDiff: null,
     isLoading: false,
+    error: null,
   });
 
   const filename = file?.filename ?? null;
@@ -42,34 +44,34 @@ export function usePierreFileDiff(
 
   useEffect(() => {
     if (!filename || !hasPatch) {
-      setState({ fileDiff: null, isLoading: false });
+      setState({ fileDiff: null, isLoading: false, error: null });
       return;
     }
 
     let cancelled = false;
-    setState({ fileDiff: null, isLoading: true });
+    setState({ fileDiff: null, isLoading: true, error: null });
 
     (async () => {
-      const [oldContent, newContent] = await Promise.all([
-        status === "added"
-          ? Promise.resolve("")
-          : github
-              .getFileContent(
+      try {
+        // `""` is the *legitimate* absence of a side (added → no base, removed →
+        // no head); only those cases short-circuit. A real fetch failure
+        // (network / rate-limit / auth) must propagate so we surface an error
+        // rather than coercing to "" and rendering a misleading whole-file diff.
+        const [oldContent, newContent] = await Promise.all([
+          status === "added"
+            ? Promise.resolve("")
+            : github.getFileContent(
                 owner,
                 repo,
                 previousFilename || filename,
                 pr.base.sha
-              )
-              .catch(() => ""),
-        status === "removed"
-          ? Promise.resolve("")
-          : github
-              .getFileContent(owner, repo, filename, pr.head.sha)
-              .catch(() => ""),
-      ]);
-      if (cancelled) return;
+              ),
+          status === "removed"
+            ? Promise.resolve("")
+            : github.getFileContent(owner, repo, filename, pr.head.sha),
+        ]);
+        if (cancelled) return;
 
-      try {
         const fileDiff = buildPierreFileDiff(
           {
             filename,
@@ -79,9 +81,14 @@ export function usePierreFileDiff(
           oldContent,
           newContent
         );
-        setState({ fileDiff, isLoading: false });
+        setState({ fileDiff, isLoading: false, error: null });
       } catch {
-        setState({ fileDiff: null, isLoading: false });
+        if (cancelled) return;
+        setState({
+          fileDiff: null,
+          isLoading: false,
+          error: "Failed to load file contents",
+        });
       }
     })();
 
