@@ -32,6 +32,11 @@ if [[ -z "$INPUT" ]]; then
   exit 1
 fi
 
+# Derive owner/repo dynamically from the current repo (works on forks).
+REPO_INFO=$(gh repo view --json owner,name --jq '{owner: .owner.login, name: .name}')
+OWNER=$(echo "$REPO_INFO" | jq -r '.owner')
+REPO=$(echo "$REPO_INFO" | jq -r '.name')
+
 # Detect if input is PR number or run ID (run IDs are much longer)
 if [[ "$INPUT" =~ ^[0-9]{1,5}$ ]]; then
   PR_NUMBER="$INPUT"
@@ -89,24 +94,28 @@ else
   JOB_IDS=$(echo "$JOBS" | jq -r '.databaseId')
 fi
 
-# Map job names to local commands for reproduction
+# Map job/step names to local bun commands for reproduction.
+# pulldash CI is a single "ci" job whose steps are fmt:check -> typecheck -> lint -> test.
 suggest_local_command() {
   local job_name="$1"
   case "$job_name" in
-    *"Static Checks"* | *"lint"* | *"typecheck"* | *"fmt"*)
-      echo "💡 Reproduce locally: make static-check"
+    *"fmt"* | *"format"* | *"prettier"*)
+      echo "💡 Reproduce locally: bun fmt:check"
       ;;
-    *"Integration Tests"*)
-      echo "💡 Reproduce locally: make test-integration"
+    *"typecheck"* | *"tsgo"* | *"tsc"*)
+      echo "💡 Reproduce locally: bun run typecheck"
       ;;
-    *"Test"*)
-      echo "💡 Reproduce locally: make test"
+    *"lint"*)
+      echo "💡 Reproduce locally: bun lint"
       ;;
-    *"Build"*)
-      echo "💡 Reproduce locally: make build"
+    *"test"*)
+      echo "💡 Reproduce locally: bun test"
       ;;
-    *"End-to-End"*)
-      echo "💡 Reproduce locally: make test-e2e"
+    *"build"*)
+      echo "💡 Reproduce locally: bun run build:browser"
+      ;;
+    *)
+      echo "💡 Reproduce locally: bun run fmt:check && bun run typecheck && bun test"
       ;;
   esac
 }
@@ -132,7 +141,7 @@ for JOB_ID in $JOB_IDS; do
 
   while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     # Use gh api to fetch logs (works for individual completed jobs even if run is in progress)
-    if gh api "/repos/coder/mux/actions/jobs/$JOB_ID/logs" 2>/dev/null; then
+    if gh api "/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null; then
       break
     else
       RETRY_COUNT=$((RETRY_COUNT + 1))

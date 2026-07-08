@@ -12,10 +12,15 @@ fi
 
 PR_NUMBER="$1"
 
+# Derive owner/repo dynamically from the current repo (works on forks).
+REPO_INFO=$(gh repo view --json owner,name --jq '{owner: .owner.login, name: .name}')
+OWNER=$(echo "$REPO_INFO" | jq -r '.owner')
+REPO=$(echo "$REPO_INFO" | jq -r '.name')
+
 # Query for unresolved review threads
 UNRESOLVED=$(gh api graphql -f query="
 {
-  repository(owner: \"coder\", name: \"mux\") {
+  repository(owner: \"$OWNER\", name: \"$REPO\") {
     pullRequest(number: $PR_NUMBER) {
       reviewThreads(first: 100) {
         nodes {
@@ -42,7 +47,7 @@ if [ -n "$UNRESOLVED" ]; then
   echo "To resolve a comment thread, use:"
   echo "$UNRESOLVED" | jq -r '"  ./scripts/resolve_pr_comment.sh \(.thread_id)"'
   echo ""
-  echo "View PR: https://github.com/coder/mux/pull/$PR_NUMBER"
+  echo "View PR: https://github.com/$OWNER/$REPO/pull/$PR_NUMBER"
   exit 1
 fi
 

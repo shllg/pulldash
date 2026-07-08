@@ -44,3 +44,8 @@ dist/
 release/
 public/
 .env*.local
+
+# agentic harness (per-session state + local scratch, never committed)
+.claude/hook-state/
+.claude/settings.local.json
+tmp/

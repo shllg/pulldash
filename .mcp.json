@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codex": {
+      "command": "npx",
+      "args": ["-y", "mcp-agents@latest", "--provider", "codex"],
+      "env": {}
+    }
+  }
+}
