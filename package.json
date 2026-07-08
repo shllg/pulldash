@@ -48,6 +48,7 @@
     "@electron/asar": "^4.0.1",
     "@hono/node-server": "^1.19.6",
     "@octokit/core": "^7.0.6",
+    "@pierre/diffs": "^1.2.12",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

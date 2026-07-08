@@ -1,5 +1,7 @@
 import React, {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -36,6 +38,7 @@ import {
 } from "lucide-react";
 import type { Reaction, ReactionContent } from "../contexts/github";
 import { Skeleton } from "../ui/skeleton";
+import { USE_PIERRE_DIFF_ENGINE } from "@/browser/lib/flags";
 import { PROverview } from "./pr-overview";
 import {
   Tooltip,
@@ -101,6 +104,14 @@ import { Keycap, KeycapGroup } from "../ui/keycap";
 import { Markdown, MarkdownEditor } from "../ui/markdown";
 import { CommandPalette, useCommandPalette } from "./command-palette";
 import { useTabContext, type TabStatus } from "../contexts/tabs";
+
+// Lazy-loaded so the experimental @pierre/diffs engine (and its Shiki
+// dependency) only enters the bundle when the `?engine=pierre` flag is set —
+// the default render path never pays for it. Requires code-splitting in
+// scripts/build-browser.ts.
+const PierreDiffPane = lazy(() =>
+  import("./pierre-diff-pane").then((m) => ({ default: m.PierreDiffPane }))
+);
 
 // ============================================================================
 // Hook to sync PR check status with tab
@@ -648,7 +659,11 @@ const DiffPanel = memo(function DiffPanel() {
 
           {/* Scrollable diff content - DiffViewer handles its own virtualized scroll */}
           <div className="flex-1 min-h-0 flex flex-col">
-            {parsedDiff && parsedDiff.hunks.length > 0 ? (
+            {USE_PIERRE_DIFF_ENGINE ? (
+              <Suspense fallback={<DiffSkeleton />}>
+                <PierreDiffPane file={currentFile} viewMode={diffViewMode} />
+              </Suspense>
+            ) : parsedDiff && parsedDiff.hunks.length > 0 ? (
               <DiffViewer diff={parsedDiff} viewMode={diffViewMode} />
             ) : isLoading || (currentFile.patch && !parsedDiff) ? (
               // Show skeleton if loading OR if file has patch but diff isn't ready yet
