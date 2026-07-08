@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { isElectron } from "../contexts/telemetry";
+import { isElectron } from "../lib/platform";
 import {
   Dialog,
   DialogContent,
