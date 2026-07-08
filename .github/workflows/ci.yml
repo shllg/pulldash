@@ -33,3 +33,6 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Build browser bundle (smoke)
+        run: bun run build:browser

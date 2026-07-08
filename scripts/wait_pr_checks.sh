@@ -131,11 +131,7 @@ while true; do
     echo ""
     echo "💡 To extract detailed logs from the failed run:"
     echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER"
-    echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER <job_pattern>  # e.g., Integration"
-    echo ""
-    echo "💡 To re-run a subset of integration tests faster with workflow_dispatch:"
-    echo "   gh workflow run ci.yml --ref $(git rev-parse --abbrev-ref HEAD) -f test_filter=\"tests/integration/specificTest.test.ts\""
-    echo "   gh workflow run ci.yml --ref $(git rev-parse --abbrev-ref HEAD) -f test_filter=\"-t 'specific test name'\""
+    echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER <step_pattern>  # e.g., typecheck"
     exit 1
   fi
 

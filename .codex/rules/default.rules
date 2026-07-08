@@ -1,0 +1,49 @@
+# pulldash Codex command rules — mirror of .claude/settings.json permissions.
+# Deploy floor: Codex NEVER pushes (main auto-deploys; v* tags release). See
+# .claude/rules/19-git-and-autonomy.md.
+
+# --- deploy floor: deny pushes and remote-mutating git outright ---
+prefix_rule(pattern=["git", "push"], decision="deny")
+prefix_rule(pattern=["git", "reset", "--hard"], decision="deny")
+prefix_rule(pattern=["sudo"], decision="deny")
+
+# --- read-only git ---
+prefix_rule(pattern=["git", "status"], decision="allow")
+prefix_rule(pattern=["git", "diff"], decision="allow")
+prefix_rule(pattern=["git", "log"], decision="allow")
+prefix_rule(pattern=["git", "show"], decision="allow")
+prefix_rule(pattern=["git", "branch"], decision="allow")
+prefix_rule(pattern=["git", "fetch"], decision="allow")
+prefix_rule(pattern=["git", "grep"], decision="allow")
+prefix_rule(pattern=["git", "rev-parse"], decision="allow")
+prefix_rule(pattern=["git", "add"], decision="allow")
+prefix_rule(pattern=["git", "commit"], decision="allow")
+
+# --- bun (the whole toolchain) ---
+prefix_rule(pattern=["bun", "test"], decision="allow")
+prefix_rule(pattern=["bun", "run", "typecheck"], decision="allow")
+prefix_rule(pattern=["bun", "run", "build:browser"], decision="allow")
+prefix_rule(pattern=["bun", "fmt"], decision="allow")
+prefix_rule(pattern=["bun", "run"], decision="allow")
+prefix_rule(pattern=["bun"], decision="allow")
+
+# --- gh reads + the repo PR scripts ---
+prefix_rule(pattern=["gh", "pr", "view"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "list"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "checks"], decision="allow")
+prefix_rule(pattern=["gh", "pr", "diff"], decision="allow")
+prefix_rule(pattern=["gh", "run", "view"], decision="allow")
+prefix_rule(pattern=["gh", "repo", "view"], decision="allow")
+prefix_rule(pattern=["gh", "issue", "view"], decision="allow")
+prefix_rule(pattern=["gh", "issue", "list"], decision="allow")
+prefix_rule(pattern=["gh", "api"], decision="allow")
+
+# --- read-only exploration ---
+prefix_rule(pattern=["ls"], decision="allow")
+prefix_rule(pattern=["cat"], decision="allow")
+prefix_rule(pattern=["find"], decision="allow")
+prefix_rule(pattern=["head"], decision="allow")
+prefix_rule(pattern=["tail"], decision="allow")
+prefix_rule(pattern=["wc"], decision="allow")
+prefix_rule(pattern=["jq"], decision="allow")
+prefix_rule(pattern=["rg"], decision="allow")

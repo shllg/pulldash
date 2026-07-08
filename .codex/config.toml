@@ -1,0 +1,13 @@
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[project]
+name = "pulldash"
+
+[env]
+DISABLE_TELEMETRY = "1"
+
+[sandbox_workspace_write]
+# gh CLI + bun install need network; the deploy floor is enforced in rules/default.rules
+# (git push is denied — Codex never pushes; the human/Claude side owns pushes).
+network_access = true

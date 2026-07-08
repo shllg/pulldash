@@ -1,0 +1,143 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git status:*)",
+      "Bash(git fetch:*)",
+      "Bash(git grep:*)",
+      "Bash(git branch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git rev-list:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git remote:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git diff-index:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git switch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git rebase:*)",
+      "Bash(git worktree:*)",
+      "Bash(git tag:*)",
+      "Bash(bun test:*)",
+      "Bash(bun run:*)",
+      "Bash(bun fmt:*)",
+      "Bash(bunx:*)",
+      "Bash(./scripts/check_pr_reviews.sh:*)",
+      "Bash(./scripts/check_codex_comments.sh:*)",
+      "Bash(./scripts/wait_pr_checks.sh:*)",
+      "Bash(./scripts/extract_pr_logs.sh:*)",
+      "Bash(./scripts/resolve_pr_comment.sh:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr status:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh label:*)",
+      "Bash(gh search:*)",
+      "Bash(gh api:*)",
+      "Bash(gh auth status:*)",
+      "Bash(ls:*)",
+      "Bash(jq:*)",
+      "Bash(rg:*)",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "mcp__codex__*",
+      "mcp__context7__*",
+      "mcp__github__*",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:react.dev)",
+      "WebFetch(domain:bun.sh)",
+      "WebFetch(domain:hono.dev)",
+      "WebFetch(domain:developer.mozilla.org)",
+      "WebSearch"
+    ],
+    "deny": [
+      "mcp__github__merge_pull_request",
+      "mcp__github__create_or_update_file",
+      "mcp__github__push_files",
+      "mcp__github__delete_file",
+      "mcp__github__update_pull_request_branch",
+      "Bash(git reset --hard:*)",
+      "Bash(git push --force origin main:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push --tags:*)",
+      "Bash(sudo:*)"
+    ],
+    "ask": [
+      "Bash(gh pr merge:*)",
+      "Bash(bun install:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git stash:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "MAX_MCP_OUTPUT_TOKENS": "120000",
+    "MCP_TIMEOUT": "300000"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/standing-directives.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/git-push-branch-guard.sh\"",
+            "if": "Bash(git push:*)",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/skill-reminder.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && if [ -n \"$(git status --porcelain)\" ] && ! bun fmt:check >/dev/null 2>&1; then echo 'pulldash: working tree has formatting issues — run `bun fmt` before committing.' >&2; fi",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
