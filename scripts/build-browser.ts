@@ -13,6 +13,9 @@ async function build() {
     plugins: [tailwind],
     target: "browser",
     format: "esm",
+    // Code-splitting so dynamic import()s (e.g. the flag-gated @pierre/diffs
+    // engine) emit as separate chunks instead of inflating the main bundle.
+    splitting: true,
   });
 
   if (!mainResult.success) {
