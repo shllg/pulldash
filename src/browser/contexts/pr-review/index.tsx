@@ -190,11 +190,14 @@ export type AnalysisLevel = "low" | "medium" | "high";
 
 // A semantic group of files produced by codex analysis. `additions`/`deletions`
 // are rolled up from PullRequestFile data (never trusted from the model).
+// `details` is a fuller multi-sentence markdown summary shown in the topic
+// detail view; optional so analyses cached before it existed still parse.
 export interface AnalysisGroup {
   id: string;
   title: string;
   description: string;
   impact: string;
+  details?: string;
   filenames: string[];
   additions: number;
   deletions: number;
@@ -271,12 +274,18 @@ interface PRReviewState {
   // File navigation
   selectedFile: string | null;
   selectedFiles: Set<string>;
+  // Selected topic group (topic detail view). Mutually exclusive with
+  // `showOverview` and `selectedFile` — exactly one main-pane view is active.
+  selectedTopic: string | null;
   showOverview: boolean;
   // Overview scroll target (GitHub-style hash: pullrequestreview-{id}, issuecomment-{id}, etc.)
   overviewScrollTarget: string | null;
 
   // Viewed files
   viewedFiles: Set<string>;
+  // Viewed topics — independent of viewed files (marking a topic viewed does
+  // not cascade to its files, and vice versa).
+  viewedTopics: Set<string>;
   hideViewed: boolean;
 
   // Diffs
@@ -345,6 +354,24 @@ function setStoredDiffViewMode(mode: DiffViewMode): void {
   } catch {}
 }
 
+// Transient per-view selection state cleared on every main-pane navigation
+// (overview / file / topic). Spread into each navigation `set()` so a new field
+// added here stays in sync across all call sites instead of drifting.
+const CLEARED_LINE_SELECTION = {
+  focusedLine: null,
+  focusedLineSide: null,
+  selectionAnchor: null,
+  selectionAnchorSide: null,
+  commentingOnLine: null,
+  gotoLineMode: false,
+  gotoLineInput: "",
+  focusedCommentId: null,
+  editingCommentId: null,
+  replyingToCommentId: null,
+  focusedPendingCommentId: null,
+  editingPendingCommentId: null,
+} satisfies Partial<PRReviewState>;
+
 export class PRReviewStore {
   private state: PRReviewState;
   private listeners = new Set<Listener>();
@@ -371,6 +398,7 @@ export class PRReviewStore {
 
     // Load viewed files from localStorage
     let viewedFiles = new Set<string>();
+    let viewedTopics = new Set<string>();
     let pendingComments: LocalPendingComment[] = [];
     let reviewBody = "";
     const diffViewMode = getStoredDiffViewMode();
@@ -379,6 +407,14 @@ export class PRReviewStore {
       const stored = localStorage.getItem(`${this.storageKey}-viewed`);
       if (stored) {
         viewedFiles = new Set(JSON.parse(stored));
+      }
+    } catch {}
+
+    // Load viewed topics from localStorage (same scheme as viewed files).
+    try {
+      const stored = localStorage.getItem(`${this.storageKey}-viewed-topics`);
+      if (stored) {
+        viewedTopics = new Set(JSON.parse(stored));
       }
     } catch {}
 
@@ -445,9 +481,11 @@ export class PRReviewStore {
       // UI state
       selectedFile: null,
       selectedFiles: new Set(),
+      selectedTopic: null,
       showOverview: true,
       overviewScrollTarget: null,
       viewedFiles,
+      viewedTopics,
       hideViewed: true,
       diffViewMode,
       loadedDiffs: {},
@@ -523,18 +561,8 @@ export class PRReviewStore {
       overviewScrollTarget: scrollTarget ?? null,
       selectedFile: null,
       selectedFiles: new Set(),
-      focusedLine: null,
-      focusedLineSide: null,
-      selectionAnchor: null,
-      selectionAnchorSide: null,
-      commentingOnLine: null,
-      gotoLineMode: false,
-      gotoLineInput: "",
-      focusedCommentId: null,
-      editingCommentId: null,
-      replyingToCommentId: null,
-      focusedPendingCommentId: null,
-      editingPendingCommentId: null,
+      selectedTopic: null,
+      ...CLEARED_LINE_SELECTION,
     });
   };
 
@@ -552,20 +580,24 @@ export class PRReviewStore {
     this.set({
       selectedFile: filename,
       selectedFiles: new Set(),
+      selectedTopic: null,
       showOverview: false,
       // Reset line selection when changing files
-      focusedLine: null,
-      focusedLineSide: null,
-      selectionAnchor: null,
-      selectionAnchorSide: null,
-      commentingOnLine: null,
-      gotoLineMode: false,
-      gotoLineInput: "",
-      focusedCommentId: null,
-      editingCommentId: null,
-      replyingToCommentId: null,
-      focusedPendingCommentId: null,
-      editingPendingCommentId: null,
+      ...CLEARED_LINE_SELECTION,
+    });
+  };
+
+  // Open the topic detail view for a group. Mirrors selectFile's reset block so
+  // the three main-pane views (overview / file / topic) stay mutually exclusive.
+  selectTopic = (groupId: string) => {
+    if (this.state.selectedTopic === groupId && !this.state.showOverview)
+      return;
+    this.set({
+      selectedTopic: groupId,
+      selectedFile: null,
+      selectedFiles: new Set(),
+      showOverview: false,
+      ...CLEARED_LINE_SELECTION,
     });
   };
 
@@ -664,6 +696,15 @@ export class PRReviewStore {
     } catch {}
   }
 
+  private persistViewedTopics(viewedTopics: Set<string>) {
+    try {
+      localStorage.setItem(
+        `${this.storageKey}-viewed-topics`,
+        JSON.stringify([...viewedTopics])
+      );
+    } catch {}
+  }
+
   private persistPendingComments(pendingComments: LocalPendingComment[]) {
     try {
       localStorage.setItem(
@@ -739,6 +780,19 @@ export class PRReviewStore {
     this.set({ viewedFiles: next });
   };
 
+  // Toggle a topic's viewed flag. Independent of viewed files and does not
+  // navigate (unlike toggleViewed) — the topic detail view drives Next itself.
+  toggleTopicViewed = (groupId: string) => {
+    const next = new Set(this.state.viewedTopics);
+    if (next.has(groupId)) {
+      next.delete(groupId);
+    } else {
+      next.add(groupId);
+    }
+    this.persistViewedTopics(next);
+    this.set({ viewedTopics: next });
+  };
+
   toggleHideViewed = () => {
     this.set({ hideViewed: !this.state.hideViewed });
   };
@@ -787,11 +841,43 @@ export class PRReviewStore {
   };
 
   setGroupByMode = (mode: GroupByMode) => {
-    if (this.state.groupByMode === mode) return;
-    this.set({
-      groupByMode: mode,
-      files: this.computeOrderedFiles(mode, this.state.analysis),
-    });
+    // Switching to Topics while on the Overview jumps straight to the first
+    // file's diff (topics order) instead of staying on Overview. This fires for
+    // both triggers of a topics switch — the sidebar Tree|Topics toggle and the
+    // post-Analyze / cache-hit `setGroupByMode("topics")` in useAnalysisLoader
+    // (auto-landing on the first file after Analyze is intended). Only fires
+    // with groups present; a no-op-navigation for tree and when already viewing
+    // a file. Decided before any ordering work so a no-op toggle stays O(1)
+    // (topics ordering length == baseFiles length, so this is the same test).
+    const shouldJump =
+      mode === "topics" &&
+      this.state.showOverview &&
+      this.baseFiles.length > 0 &&
+      this.state.analysis !== null &&
+      this.state.analysis.groups.length > 0;
+
+    if (this.state.groupByMode === mode && !shouldJump) return;
+
+    // Order only when the mode actually changes or a jump can fire.
+    const orderedFiles = this.computeOrderedFiles(mode, this.state.analysis);
+
+    // Done in a single set so no stale frame renders.
+    if (shouldJump) {
+      const first = orderedFiles[0].filename;
+      this.lastSelectedFile = first;
+      this.set({
+        groupByMode: mode,
+        files: orderedFiles,
+        selectedFile: first,
+        selectedFiles: new Set(),
+        selectedTopic: null,
+        showOverview: false,
+        ...CLEARED_LINE_SELECTION,
+      });
+      return;
+    }
+
+    this.set({ groupByMode: mode, files: orderedFiles });
   };
 
   // ---------------------------------------------------------------------------

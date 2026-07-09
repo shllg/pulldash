@@ -52,6 +52,7 @@ import { cn } from "../cn";
 import { PRHeader } from "./pr-header";
 import { FileTree } from "./file-tree";
 import { FileHeader } from "./file-header";
+import { TopicDetail } from "./topic-detail";
 import type { PullRequest, PullRequestFile, ReviewComment } from "@/api/types";
 import {
   useGitHub,
@@ -459,6 +460,8 @@ const FilePanel = memo(function FilePanel({
   const hideViewed = usePRReviewSelector((s) => s.hideViewed);
   const showOverview = usePRReviewSelector((s) => s.showOverview);
   const groupByMode = usePRReviewSelector((s) => s.groupByMode);
+  const selectedTopic = usePRReviewSelector((s) => s.selectedTopic);
+  const viewedTopics = usePRReviewSelector((s) => s.viewedTopics);
   const analysis = usePRReviewSelector((s) => s.analysis);
   const analysisStatus = usePRReviewSelector((s) => s.analysisStatus);
   const analysisError = usePRReviewSelector((s) => s.analysisError);
@@ -490,6 +493,16 @@ const FilePanel = memo(function FilePanel({
     store.selectOverview();
     onFileSelect?.();
   }, [store, onFileSelect]);
+
+  // Selecting a topic opens the detail view in the main pane; close the mobile
+  // sidebar just like selecting a file.
+  const handleSelectTopic = useCallback(
+    (groupId: string) => {
+      store.selectTopic(groupId);
+      onFileSelect?.();
+    },
+    [store, onFileSelect]
+  );
 
   return (
     <aside
@@ -634,6 +647,10 @@ const FilePanel = memo(function FilePanel({
         groupByMode={groupByMode}
         groups={analysis?.groups}
         fileMeta={analysis?.fileMeta}
+        selectedTopic={selectedTopic}
+        viewedTopics={viewedTopics}
+        onSelectTopic={handleSelectTopic}
+        onToggleTopicViewed={store.toggleTopicViewed}
         onSelectFile={handleSelectFile}
         onToggleFileSelection={store.toggleFileSelection}
         onToggleViewed={store.toggleViewed}
@@ -690,6 +707,7 @@ const DiffPanel = memo(function DiffPanel() {
   const selectedFile = usePRReviewSelector((s) => s.selectedFile);
   const viewedFiles = usePRReviewSelector((s) => s.viewedFiles);
   const selectedFiles = usePRReviewSelector((s) => s.selectedFiles);
+  const selectedTopic = usePRReviewSelector((s) => s.selectedTopic);
   const showOverview = usePRReviewSelector((s) => s.showOverview);
   const diffViewMode = usePRReviewSelector((s) => s.diffViewMode);
 
@@ -700,6 +718,16 @@ const DiffPanel = memo(function DiffPanel() {
   const currentIndex = selectedFile
     ? files.findIndex((f) => f.filename === selectedFile)
     : -1;
+
+  // Topic detail view (mutually exclusive with overview/file — checked first).
+  if (selectedTopic) {
+    return (
+      <main className="flex-1 overflow-hidden flex flex-col">
+        <ReadOnlyBanner />
+        <TopicDetail />
+      </main>
+    );
+  }
 
   // Show overview panel
   if (showOverview) {

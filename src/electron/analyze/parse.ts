@@ -47,6 +47,7 @@ interface RawGroup {
   title?: unknown;
   description?: unknown;
   impact?: unknown;
+  details?: unknown;
   filenames?: unknown;
 }
 
@@ -111,6 +112,8 @@ export function parseCodexAnalysis(
       title: asString(rawGroup.title) || `Group ${index + 1}`,
       description: asString(rawGroup.description),
       impact: asString(rawGroup.impact),
+      // Tolerant: absent on analyses cached before `details` existed → "".
+      details: asString(rawGroup.details),
       filenames,
       additions,
       deletions,

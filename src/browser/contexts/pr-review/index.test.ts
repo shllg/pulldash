@@ -875,3 +875,92 @@ test("setGroupByMode topics is a no-op ordering without analysis groups", () => 
   ]);
   expect(store.getSnapshot().groupByMode).toBe("topics");
 });
+
+// ============================================================================
+// Topics jump + topic detail view
+// ============================================================================
+
+const topicsFiles = () => [
+  createMockFile("README.md"),
+  createMockFile("src/ui/Button.tsx"),
+  createMockFile("src/db/schema.ts"),
+  createMockFile("src/db/migrate.ts"),
+];
+
+test("setGroupByMode topics from Overview jumps to the first topics-ordered file", () => {
+  const store = createStore({ files: topicsFiles() });
+  store.setAnalysis(makeAnalysis());
+  expect(store.getSnapshot().showOverview).toBe(true);
+
+  store.setGroupByMode("topics");
+
+  const state = store.getSnapshot();
+  expect(state.showOverview).toBe(false);
+  // First file of the first topic (db group).
+  expect(state.selectedFile).toBe("src/db/schema.ts");
+  expect(state.selectedTopic).toBeNull();
+  expect(state.groupByMode).toBe("topics");
+});
+
+test("setGroupByMode topics from a selected file leaves the selection unchanged", () => {
+  const store = createStore({ files: topicsFiles() });
+  store.setAnalysis(makeAnalysis());
+  store.selectFile("README.md");
+
+  store.setGroupByMode("topics");
+
+  const state = store.getSnapshot();
+  expect(state.selectedFile).toBe("README.md");
+  expect(state.showOverview).toBe(false);
+  expect(state.groupByMode).toBe("topics");
+});
+
+test("setGroupByMode tree never navigates away from a file", () => {
+  const store = createStore({ files: topicsFiles() });
+  store.setAnalysis(makeAnalysis());
+  store.setGroupByMode("topics"); // jumps to the first file
+  const selected = store.getSnapshot().selectedFile;
+
+  store.setGroupByMode("tree");
+
+  const state = store.getSnapshot();
+  expect(state.groupByMode).toBe("tree");
+  expect(state.selectedFile).toBe(selected);
+  expect(state.showOverview).toBe(false);
+});
+
+test("selectTopic opens the topic detail view and clears file/overview", () => {
+  const store = createStore();
+  store.selectTopic("db");
+
+  const state = store.getSnapshot();
+  expect(state.selectedTopic).toBe("db");
+  expect(state.selectedFile).toBeNull();
+  expect(state.showOverview).toBe(false);
+});
+
+test("selectFile and selectOverview clear the selected topic", () => {
+  const store = createStore();
+
+  store.selectTopic("db");
+  store.selectFile("src/index.ts");
+  expect(store.getSnapshot().selectedTopic).toBeNull();
+
+  store.selectTopic("db");
+  store.selectOverview();
+  expect(store.getSnapshot().selectedTopic).toBeNull();
+});
+
+test("toggleTopicViewed adds/removes a topic id and persists", () => {
+  const store = createStore();
+  expect(store.getSnapshot().viewedTopics.has("db")).toBe(false);
+
+  store.toggleTopicViewed("db");
+  expect(store.getSnapshot().viewedTopics.has("db")).toBe(true);
+  expect(JSON.parse(storage.get("pr-test-repo-1-viewed-topics")!)).toContain(
+    "db"
+  );
+
+  store.toggleTopicViewed("db");
+  expect(store.getSnapshot().viewedTopics.has("db")).toBe(false);
+});

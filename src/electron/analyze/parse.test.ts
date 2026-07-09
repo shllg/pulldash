@@ -168,6 +168,32 @@ test("parseCodexAnalysis claims each file for only the first group", () => {
   expect(analysis.groups[1].filenames).toEqual(["src/db/migrate.ts"]);
 });
 
+test("parseCodexAnalysis reads a group's details field", () => {
+  const raw = JSON.stringify({
+    groups: [
+      {
+        id: "db",
+        title: "DB",
+        description: "schema",
+        impact: "migration",
+        details: "## Core\nAdds a users table.\n\n- Watch the migration order.",
+        filenames: ["src/db/schema.ts"],
+      },
+    ],
+    fileMeta: {},
+  });
+  const analysis = parseCodexAnalysis(raw, files);
+  expect(analysis.groups[0].details).toContain("Adds a users table");
+});
+
+test("parseCodexAnalysis defaults absent/invalid details to empty string", () => {
+  // validPayload's groups omit `details` (mirrors an analysis cached before it
+  // existed) — tolerant parse must yield "" rather than throw.
+  const analysis = parseCodexAnalysis(validPayload(), files);
+  expect(analysis.groups[0].details).toBe("");
+  expect(analysis.groups[1].details).toBe("");
+});
+
 test("parseCodexAnalysis throws on non-JSON output (fail-closed)", () => {
   expect(() => parseCodexAnalysis("codex could not comply", files)).toThrow();
 });
