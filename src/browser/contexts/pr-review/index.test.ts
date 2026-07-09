@@ -1,6 +1,11 @@
 import { test, expect, beforeEach } from "bun:test";
 import type { PullRequest, PullRequestFile, ReviewComment } from "@/api/types";
-import { PRReviewStore, sortFilesLikeTree } from "./index";
+import {
+  PRReviewStore,
+  sortFilesLikeTree,
+  orderFilesByTopics,
+  type PRAnalysis,
+} from "./index";
 import type { GitHubStore } from "@/browser/contexts/github";
 
 // Mock localStorage
@@ -687,4 +692,186 @@ test("clearOverviewScrollTarget clears the target", () => {
   store.clearOverviewScrollTarget();
 
   expect(store.getSnapshot().overviewScrollTarget).toBeNull();
+});
+
+// ============================================================================
+// Semantic Analysis (codex topic grouping)
+// ============================================================================
+
+function makeAnalysis(): PRAnalysis {
+  return {
+    groups: [
+      {
+        id: "db",
+        title: "Database",
+        description: "schema changes",
+        impact: "migration required",
+        filenames: ["src/db/schema.ts", "src/db/migrate.ts"],
+        additions: 0,
+        deletions: 0,
+      },
+      {
+        id: "ui",
+        title: "UI",
+        description: "button + dialog",
+        impact: "visual",
+        filenames: ["src/ui/Button.tsx"],
+        additions: 0,
+        deletions: 0,
+      },
+    ],
+    fileMeta: {
+      "src/db/schema.ts": {
+        risk: "high",
+        complexity: "medium",
+        summary: "adds users table",
+      },
+      "src/ui/Button.tsx": {
+        risk: "low",
+        complexity: "low",
+        summary: "tweaks padding",
+      },
+    },
+  };
+}
+
+test("orderFilesByTopics emits group order then appends uncovered in tree order", () => {
+  const files = [
+    createMockFile("README.md"),
+    createMockFile("src/ui/Button.tsx"),
+    createMockFile("src/db/schema.ts"),
+    createMockFile("src/db/migrate.ts"),
+  ];
+
+  const ordered = orderFilesByTopics(files, makeAnalysis().groups);
+
+  expect(ordered.map((f) => f.filename)).toEqual([
+    // db group, in group-member order
+    "src/db/schema.ts",
+    "src/db/migrate.ts",
+    // ui group
+    "src/ui/Button.tsx",
+    // uncovered file appended in tree order
+    "README.md",
+  ]);
+});
+
+test("orderFilesByTopics ignores unknown filenames and never drops/dupes files", () => {
+  const files = [createMockFile("a.ts"), createMockFile("b.ts")];
+  const groups = [
+    {
+      id: "g",
+      title: "",
+      description: "",
+      impact: "",
+      filenames: ["ghost.ts", "a.ts", "a.ts"],
+      additions: 0,
+      deletions: 0,
+    },
+  ];
+
+  const ordered = orderFilesByTopics(files, groups);
+
+  // Every input file appears exactly once; hallucinated "ghost.ts" dropped.
+  expect(ordered.map((f) => f.filename).sort()).toEqual(["a.ts", "b.ts"]);
+  expect(ordered).toHaveLength(files.length);
+});
+
+test("setGroupByMode topics reorders files to topic order and back to tree", () => {
+  const store = createStore({
+    files: [
+      createMockFile("README.md"),
+      createMockFile("src/ui/Button.tsx"),
+      createMockFile("src/db/schema.ts"),
+      createMockFile("src/db/migrate.ts"),
+    ],
+  });
+  store.setAnalysis(makeAnalysis());
+
+  // Default tree order (folders first, alphabetical).
+  const treeOrder = store.getSnapshot().files.map((f) => f.filename);
+  expect(treeOrder).toEqual([
+    "src/db/migrate.ts",
+    "src/db/schema.ts",
+    "src/ui/Button.tsx",
+    "README.md",
+  ]);
+
+  store.setGroupByMode("topics");
+  expect(store.getSnapshot().files.map((f) => f.filename)).toEqual([
+    "src/db/schema.ts",
+    "src/db/migrate.ts",
+    "src/ui/Button.tsx",
+    "README.md",
+  ]);
+
+  store.setGroupByMode("tree");
+  expect(store.getSnapshot().files.map((f) => f.filename)).toEqual(treeOrder);
+});
+
+test("groupByMode toggle keeps j/k navigation sequence complete", () => {
+  const store = createStore({
+    files: [
+      createMockFile("README.md"),
+      createMockFile("src/ui/Button.tsx"),
+      createMockFile("src/db/schema.ts"),
+      createMockFile("src/db/migrate.ts"),
+    ],
+  });
+  store.setAnalysis(makeAnalysis());
+  store.setGroupByMode("topics");
+
+  // Walk the full sequence with navigateToFile("next") from the first file.
+  const files = store.getSnapshot().files;
+  store.selectFile(files[0].filename);
+  const visited = [files[0].filename];
+  for (let i = 1; i < files.length; i++) {
+    store.navigateToFile("next");
+    visited.push(store.getSnapshot().selectedFile!);
+  }
+
+  // Every file visited exactly once, in topic order — no drops or dupes.
+  expect(visited).toEqual(files.map((f) => f.filename));
+  expect(new Set(visited).size).toBe(files.length);
+});
+
+test("setAnalysis stores fileMeta for per-file badge lookup", () => {
+  const store = createStore();
+
+  expect(store.getSnapshot().analysis).toBeNull();
+  expect(store.getSnapshot().analysisStatus).toBe("idle");
+
+  store.setAnalysis(makeAnalysis());
+
+  const meta = store.getSnapshot().analysis?.fileMeta["src/db/schema.ts"];
+  expect(meta?.risk).toBe("high");
+  expect(meta?.complexity).toBe("medium");
+  expect(meta?.summary).toBe("adds users table");
+});
+
+test("setAnalysisStatus tracks running/error transitions", () => {
+  const store = createStore();
+
+  store.setAnalysisStatus("running");
+  expect(store.getSnapshot().analysisStatus).toBe("running");
+  expect(store.getSnapshot().analysisError).toBeNull();
+
+  store.setAnalysisStatus("error", "codex not found");
+  expect(store.getSnapshot().analysisStatus).toBe("error");
+  expect(store.getSnapshot().analysisError).toBe("codex not found");
+});
+
+test("setGroupByMode topics is a no-op ordering without analysis groups", () => {
+  const store = createStore({
+    files: [createMockFile("b.ts"), createMockFile("a.ts")],
+  });
+
+  store.setGroupByMode("topics");
+
+  // No analysis yet → stays in tree order, still navigable.
+  expect(store.getSnapshot().files.map((f) => f.filename)).toEqual([
+    "a.ts",
+    "b.ts",
+  ]);
+  expect(store.getSnapshot().groupByMode).toBe("topics");
 });

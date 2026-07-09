@@ -67,6 +67,43 @@ export function sortFilesLikeTree<T extends { filename: string }>(
   });
 }
 
+/**
+ * Order files by semantic topic groups (codex analysis). Files are emitted in
+ * group order, then group-member order; any file not covered by a group is
+ * appended in tree order. Guarantees every input file appears exactly once, so
+ * the j/k navigation sequence stays complete and non-duplicated when a reviewer
+ * switches to Topics mode.
+ */
+export function orderFilesByTopics<T extends { filename: string }>(
+  files: T[],
+  groups: readonly { filenames: string[] }[]
+): T[] {
+  const byName = new Map(files.map((f) => [f.filename, f]));
+  const used = new Set<string>();
+  const ordered: T[] = [];
+
+  for (const group of groups) {
+    for (const name of group.filenames) {
+      if (used.has(name)) continue;
+      const file = byName.get(name);
+      if (file) {
+        ordered.push(file);
+        used.add(name);
+      }
+    }
+  }
+
+  // Append files not referenced by any group, in stable tree order.
+  for (const file of sortFilesLikeTree(files)) {
+    if (!used.has(file.filename)) {
+      ordered.push(file);
+      used.add(file.filename);
+    }
+  }
+
+  return ordered;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -145,6 +182,39 @@ export interface WorkflowRunAwaitingApproval {
 // Merge method type
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+// ============================================================================
+// Semantic Analysis (codex topic grouping) — Electron-only feature
+// ============================================================================
+
+export type AnalysisLevel = "low" | "medium" | "high";
+
+// A semantic group of files produced by codex analysis. `additions`/`deletions`
+// are rolled up from PullRequestFile data (never trusted from the model).
+export interface AnalysisGroup {
+  id: string;
+  title: string;
+  description: string;
+  impact: string;
+  filenames: string[];
+  additions: number;
+  deletions: number;
+}
+
+// Per-file analysis metadata (risk/complexity badges + one-line summary).
+export interface FileAnalysisMeta {
+  risk: AnalysisLevel;
+  complexity: AnalysisLevel;
+  summary: string;
+}
+
+export interface PRAnalysis {
+  groups: AnalysisGroup[];
+  fileMeta: Record<string, FileAnalysisMeta>;
+}
+
+export type AnalysisStatus = "idle" | "running" | "error" | "done";
+export type GroupByMode = "tree" | "topics";
+
 interface PRReviewState {
   // Core data
   pr: PullRequest;
@@ -189,6 +259,14 @@ interface PRReviewState {
 
   // Diff view mode (unified or split) - global user preference
   diffViewMode: DiffViewMode;
+
+  // Semantic analysis (codex topic grouping) — Electron-only.
+  // `analysis` is the sole source of truth for groups + per-file metadata;
+  // `groupByMode` drives whether the sidebar/j-k order is tree or topics.
+  analysis: PRAnalysis | null;
+  analysisStatus: AnalysisStatus;
+  analysisError: string | null;
+  groupByMode: GroupByMode;
 
   // File navigation
   selectedFile: string | null;
@@ -274,6 +352,8 @@ export class PRReviewStore {
   private github: GitHubStore;
   // Track recently approved workflow IDs to filter out stale API responses
   private recentlyApprovedWorkflowIds = new Set<number>();
+  // Stable tree-sorted base used to (re)derive the ordered `files` view per mode.
+  private baseFiles: PullRequestFile[];
 
   constructor(
     github: GitHubStore,
@@ -320,11 +400,18 @@ export class PRReviewStore {
 
     // Sort files to match file tree order (folders first, then alphabetically)
     const sortedFiles = sortFilesLikeTree(initialState.files);
+    this.baseFiles = sortedFiles;
 
     this.state = {
       ...initialState,
       files: sortedFiles,
       viewerCanMergeAsAdmin: false,
+
+      // Semantic analysis (codex topic grouping)
+      analysis: null,
+      analysisStatus: "idle",
+      analysisError: null,
+      groupByMode: "tree",
 
       // PR data (loaded separately)
       reviews: [],
@@ -669,6 +756,42 @@ export class PRReviewStore {
   toggleDiffViewMode = () => {
     const newMode = this.state.diffViewMode === "unified" ? "split" : "unified";
     this.setDiffViewMode(newMode);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Semantic Analysis Actions (codex topic grouping)
+  // ---------------------------------------------------------------------------
+
+  // Derive the ordered `files` view for a given mode. Topics ordering only
+  // applies when we actually have analysis groups; otherwise fall back to the
+  // stable tree order so j/k navigation is always well-defined.
+  private computeOrderedFiles(
+    mode: GroupByMode,
+    analysis: PRAnalysis | null
+  ): PullRequestFile[] {
+    if (mode === "topics" && analysis && analysis.groups.length > 0) {
+      return orderFilesByTopics(this.baseFiles, analysis.groups);
+    }
+    return this.baseFiles;
+  }
+
+  setAnalysis = (analysis: PRAnalysis | null) => {
+    this.set({
+      analysis,
+      files: this.computeOrderedFiles(this.state.groupByMode, analysis),
+    });
+  };
+
+  setAnalysisStatus = (status: AnalysisStatus, error: string | null = null) => {
+    this.set({ analysisStatus: status, analysisError: error });
+  };
+
+  setGroupByMode = (mode: GroupByMode) => {
+    if (this.state.groupByMode === mode) return;
+    this.set({
+      groupByMode: mode,
+      files: this.computeOrderedFiles(mode, this.state.analysis),
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -2755,6 +2878,11 @@ export { useCommentRangeLookup } from "./useCommentRangeLookup";
 export { useKeyboardNavigation } from "./useKeyboardNavigation";
 export { useHashNavigation } from "./useHashNavigation";
 export { useDiffLoader } from "./useDiffLoader";
+export {
+  useAnalysisLoader,
+  analysisCacheKey,
+  parseSSEChunk,
+} from "./useAnalysisLoader";
 export { useCurrentUserLoader } from "./useCurrentUserLoader";
 export { usePendingReviewLoader } from "./usePendingReviewLoader";
 export { useThreadActions } from "./useThreadActions";

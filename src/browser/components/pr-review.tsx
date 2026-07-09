@@ -35,7 +35,9 @@ import {
   ExternalLink,
   BookOpen,
   Smile,
+  Sparkles,
 } from "lucide-react";
+import { isElectron } from "@/browser/lib/platform";
 import type { Reaction, ReactionContent } from "../contexts/github";
 import { Skeleton } from "../ui/skeleton";
 import { USE_PIERRE_DIFF_ENGINE } from "@/browser/lib/flags";
@@ -67,6 +69,7 @@ import {
   useKeyboardNavigation,
   useHashNavigation,
   useDiffLoader,
+  useAnalysisLoader,
   usePendingReviewLoader,
   useCurrentUserLoader,
   useCommentActions,
@@ -455,10 +458,24 @@ const FilePanel = memo(function FilePanel({
   const viewedFiles = usePRReviewSelector((s) => s.viewedFiles);
   const hideViewed = usePRReviewSelector((s) => s.hideViewed);
   const showOverview = usePRReviewSelector((s) => s.showOverview);
+  const groupByMode = usePRReviewSelector((s) => s.groupByMode);
+  const analysis = usePRReviewSelector((s) => s.analysis);
+  const analysisStatus = usePRReviewSelector((s) => s.analysisStatus);
+  const analysisError = usePRReviewSelector((s) => s.analysisError);
 
   const commentCounts = useCommentCountsByFile();
   const pendingCommentCounts = usePendingCommentCountsByFile();
   const { copyDiff, copyFile, copyMainVersion } = useFileCopyActions();
+
+  // Semantic analysis is Electron-only (needs the local checkout + codex CLI).
+  const showAnalysis = isElectron();
+
+  // Owns the analysis async: hydrate-from-cache on open + run codex on demand.
+  const { startAnalysis } = useAnalysisLoader();
+  // Once analyzed, the button re-runs (force) to refresh against the same head.
+  const handleAnalyze = useCallback(() => {
+    void startAnalysis(analysisStatus === "done");
+  }, [startAnalysis, analysisStatus]);
 
   // Wrap file selection to close mobile sidebar
   const handleSelectFile = useCallback(
@@ -547,6 +564,63 @@ const FilePanel = memo(function FilePanel({
         </TooltipProvider>
       </div>
 
+      {/* Tree | Topics toggle + Analyze (Electron-only semantic grouping) */}
+      {showAnalysis && (
+        <div className="mx-2 mb-2 flex items-center gap-1.5">
+          <div className="flex items-center rounded-md border border-border overflow-hidden text-xs shrink-0">
+            <button
+              onClick={() => store.setGroupByMode("tree")}
+              className={cn(
+                "px-2 py-1 transition-colors",
+                groupByMode === "tree"
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/50"
+              )}
+            >
+              Tree
+            </button>
+            <button
+              onClick={() => store.setGroupByMode("topics")}
+              disabled={!analysis}
+              className={cn(
+                "px-2 py-1 transition-colors border-l border-border",
+                groupByMode === "topics"
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/50",
+                !analysis && "opacity-40 cursor-not-allowed"
+              )}
+            >
+              Topics
+            </button>
+          </div>
+          <button
+            onClick={handleAnalyze}
+            disabled={analysisStatus === "running"}
+            className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1 text-xs rounded-md border border-border bg-muted/50 hover:bg-muted transition-colors disabled:opacity-60"
+          >
+            {analysisStatus === "running" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" />
+            )}
+            {analysisStatus === "running"
+              ? "Analyzing…"
+              : analysisStatus === "done"
+                ? "Re-analyze"
+                : "Analyze"}
+          </button>
+        </div>
+      )}
+
+      {showAnalysis && analysisStatus === "error" && analysisError && (
+        <div
+          className="mx-2 mb-2 text-[11px] text-red-400 truncate"
+          title={analysisError}
+        >
+          {analysisError}
+        </div>
+      )}
+
       <div className="border-t border-border/50" />
 
       <FileTree
@@ -557,6 +631,9 @@ const FilePanel = memo(function FilePanel({
         hideViewed={hideViewed}
         commentCounts={commentCounts}
         pendingCommentCounts={pendingCommentCounts}
+        groupByMode={groupByMode}
+        groups={analysis?.groups}
+        fileMeta={analysis?.fileMeta}
         onSelectFile={handleSelectFile}
         onToggleFileSelection={store.toggleFileSelection}
         onToggleViewed={store.toggleViewed}

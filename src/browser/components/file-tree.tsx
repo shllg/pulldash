@@ -25,6 +25,13 @@ import {
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import type { PullRequestFile } from "@/api/types";
+import {
+  sortFilesLikeTree,
+  type AnalysisGroup,
+  type AnalysisLevel,
+  type FileAnalysisMeta,
+  type GroupByMode,
+} from "@/browser/contexts/pr-review";
 
 interface FileTreeProps {
   files: PullRequestFile[];
@@ -34,6 +41,11 @@ interface FileTreeProps {
   hideViewed: boolean;
   commentCounts: Record<string, number>;
   pendingCommentCounts?: Record<string, number>;
+  // Semantic analysis (codex topic grouping). When groupByMode==="topics" and
+  // groups are present, the tree is replaced by topic groups + risk badges.
+  groupByMode?: GroupByMode;
+  groups?: readonly AnalysisGroup[];
+  fileMeta?: Record<string, FileAnalysisMeta>;
   onSelectFile: (filename: string) => void;
   onToggleFileSelection: (filename: string, isShiftClick: boolean) => void;
   onToggleViewed: (filename: string) => void;
@@ -56,12 +68,107 @@ interface TreeNode {
   file?: PullRequestFile;
 }
 
-// Flattened item for virtualization
-interface FlatItem {
+// Flattened item for virtualization. Either a tree node (file/folder) or a
+// topic group header. `"group" in item` narrows to the header variant.
+interface NodeFlatItem {
   node: TreeNode;
   depth: number;
   // For folders: list of all file paths under this folder
   filesInFolder?: string[];
+}
+interface GroupFlatItem {
+  group: AnalysisGroup;
+  additions: number;
+  deletions: number;
+  fileCount: number;
+  collapsed: boolean;
+}
+type FlatItem = NodeFlatItem | GroupFlatItem;
+
+function isGroupHeader(item: FlatItem): item is GroupFlatItem {
+  return "group" in item;
+}
+
+const OTHER_GROUP_ID = "__other__";
+
+// Build the flat, virtualizable model for Topics mode: a header row per group
+// followed by its (optionally collapsed) file rows. Files not referenced by any
+// group are collected into a trailing "Other changes" group so every file stays
+// reachable. Rollup +/- counts are computed from PullRequestFile data — never
+// trusted from the model. Pure + exported for data-layer testing.
+export function buildTopicsFlat(
+  files: PullRequestFile[],
+  groups: readonly AnalysisGroup[],
+  viewedFiles: Set<string>,
+  hideViewed: boolean,
+  collapsedGroups: Set<string>
+): FlatItem[] {
+  const byName = new Map(files.map((f) => [f.filename, f]));
+  const used = new Set<string>();
+  const items: FlatItem[] = [];
+
+  const pushGroup = (group: AnalysisGroup, groupFiles: PullRequestFile[]) => {
+    const visible = hideViewed
+      ? groupFiles.filter((f) => !viewedFiles.has(f.filename))
+      : groupFiles;
+    // Hide a group whose files are all viewed (mirrors folder hide-viewed).
+    if (visible.length === 0) return;
+    const additions = groupFiles.reduce((s, f) => s + (f.additions ?? 0), 0);
+    const deletions = groupFiles.reduce((s, f) => s + (f.deletions ?? 0), 0);
+    const collapsed = collapsedGroups.has(group.id);
+    items.push({
+      group,
+      additions,
+      deletions,
+      fileCount: groupFiles.length,
+      collapsed,
+    });
+    if (collapsed) return;
+    for (const f of visible) {
+      items.push({
+        node: {
+          name: f.filename.split("/").pop() ?? f.filename,
+          path: f.filename,
+          type: "file",
+          file: f,
+        },
+        depth: 1,
+      });
+    }
+  };
+
+  for (const group of groups) {
+    const groupFiles: PullRequestFile[] = [];
+    for (const name of group.filenames) {
+      if (used.has(name)) continue;
+      const file = byName.get(name);
+      if (file) {
+        groupFiles.push(file);
+        used.add(name);
+      }
+    }
+    pushGroup(group, groupFiles);
+  }
+
+  const uncovered = sortFilesLikeTree(
+    files.filter((f) => !used.has(f.filename))
+  );
+  if (uncovered.length > 0) {
+    pushGroup(
+      {
+        id: OTHER_GROUP_ID,
+        title: "Other changes",
+        description: "",
+        impact: "",
+        filenames: uncovered.map((f) => f.filename),
+        additions: 0,
+        deletions: 0,
+      },
+      uncovered
+    );
+  }
+
+  return items;
 }
 
 function buildTree(files: PullRequestFile[]): TreeNode[] {
@@ -127,6 +234,35 @@ function getFileIcon(file: PullRequestFile) {
   }
 }
 
+const LEVEL_CLASS: Record<AnalysisLevel, string> = {
+  high: "text-red-400 bg-red-500/15",
+  medium: "text-yellow-400 bg-yellow-500/15",
+  low: "text-green-400 bg-green-500/15",
+};
+
+// Compact risk/complexity badge (single colored letter + tooltip). Kept tiny so
+// it fits alongside the (truncated) filename in the 256px sidebar.
+function LevelBadge({
+  kind,
+  level,
+}: {
+  kind: "Risk" | "Complexity";
+  level: AnalysisLevel;
+}) {
+  return (
+    <span
+      title={`${kind}: ${level}`}
+      className={cn(
+        "text-[10px] leading-none px-1 py-0.5 rounded font-semibold uppercase shrink-0",
+        LEVEL_CLASS[level]
+      )}
+    >
+      {kind[0]}
+      {level[0]}
+    </span>
+  );
+}
+
 // Helper to collect all file paths under a folder
 function collectFilesInFolder(node: TreeNode): string[] {
   if (node.type === "file") {
@@ -183,7 +319,12 @@ function flattenTree(
   return items;
 }
 
-const ROW_HEIGHT = 28; // Height of each row in pixels
+const ROW_HEIGHT = 28; // Height of each file/folder row in pixels
+const GROUP_HEADER_HEIGHT = 64; // Taller row for a topic group header
+
+// Stable fallbacks so default props don't churn the topics useMemo each render.
+const EMPTY_GROUPS: readonly AnalysisGroup[] = [];
+const EMPTY_META: Record<string, FileAnalysisMeta> = {};
 
 export function FileTree({
   files,
@@ -193,6 +334,9 @@ export function FileTree({
   hideViewed,
   commentCounts,
   pendingCommentCounts = {},
+  groupByMode = "tree",
+  groups = EMPTY_GROUPS,
+  fileMeta = EMPTY_META,
   onSelectFile,
   onToggleFileSelection,
   onToggleViewed,
@@ -203,6 +347,10 @@ export function FileTree({
   onCopyMainVersion,
 }: FileTreeProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+
+  // Topics layout only applies when analysis groups exist; otherwise fall back
+  // to the tree so the sidebar is always well-defined.
+  const topicsMode = groupByMode === "topics" && groups.length > 0;
 
   const tree = useMemo(() => buildTree(files), [files]);
   const filteredTree = useMemo(
@@ -221,6 +369,10 @@ export function FileTree({
     return folders;
   });
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    () => new Set()
+  );
+
   const toggleFolder = useCallback((path: string) => {
     setExpandedFolders((prev) => {
       const next = new Set(prev);
@@ -233,24 +385,58 @@ export function FileTree({
     });
   }, []);
 
-  // Flatten tree for virtualization
+  const toggleGroup = useCallback((id: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  // Flatten the active model for virtualization (tree or topics).
   const flatItems = useMemo(
-    () => flattenTree(filteredTree, expandedFolders),
-    [filteredTree, expandedFolders]
+    () =>
+      topicsMode
+        ? buildTopicsFlat(
+            files,
+            groups,
+            viewedFiles,
+            hideViewed,
+            collapsedGroups
+          )
+        : flattenTree(filteredTree, expandedFolders),
+    [
+      topicsMode,
+      files,
+      groups,
+      viewedFiles,
+      hideViewed,
+      collapsedGroups,
+      filteredTree,
+      expandedFolders,
+    ]
   );
 
   // Create index for scrolling to selected file
   const selectedIndex = useMemo(() => {
     if (!selectedFile) return -1;
     return flatItems.findIndex(
-      (item) => item.node.type === "file" && item.node.path === selectedFile
+      (item) =>
+        !isGroupHeader(item) &&
+        item.node.type === "file" &&
+        item.node.path === selectedFile
     );
   }, [flatItems, selectedFile]);
 
   const virtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (index) =>
+      isGroupHeader(flatItems[index]) ? GROUP_HEADER_HEIGHT : ROW_HEIGHT,
     overscan: 20,
   });
 
@@ -273,6 +459,7 @@ export function FileTree({
 
   const handleItemClick = useCallback(
     (item: FlatItem, e: React.MouseEvent) => {
+      if (isGroupHeader(item)) return;
       if (item.node.type === "file") {
         if (e.shiftKey || e.metaKey || e.ctrlKey) {
           e.preventDefault();
@@ -309,6 +496,56 @@ export function FileTree({
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const item = flatItems[virtualRow.index];
           if (!item) return null;
+
+          // Topic group header row
+          if (isGroupHeader(item)) {
+            const { group, additions, deletions, collapsed } = item;
+            return (
+              <div
+                key={`group:${group.id}`}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <button
+                  onClick={() => toggleGroup(group.id)}
+                  className="w-full h-full flex flex-col justify-center gap-0.5 px-2 py-1 text-left border-b border-border/40 bg-muted/30 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-1">
+                    {collapsed ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    )}
+                    <span className="truncate flex-1 text-xs font-semibold">
+                      {group.title}
+                    </span>
+                    <span className="text-[10px] font-mono text-green-500 shrink-0">
+                      +{additions}
+                    </span>
+                    <span className="text-[10px] font-mono text-red-500 shrink-0">
+                      −{deletions}
+                    </span>
+                  </div>
+                  {group.description && (
+                    <span className="truncate text-[11px] text-muted-foreground pl-5">
+                      {group.description}
+                    </span>
+                  )}
+                  {group.impact && (
+                    <span className="truncate text-[11px] text-muted-foreground/80 italic pl-5">
+                      {group.impact}
+                    </span>
+                  )}
+                </button>
+              </div>
+            );
+          }
 
           const { node, depth, filesInFolder } = item;
 
@@ -390,6 +627,7 @@ export function FileTree({
           const isViewed = viewedFiles.has(node.path);
           const commentCount = commentCounts[node.path] || 0;
           const pendingCount = pendingCommentCounts[node.path] || 0;
+          const meta = topicsMode ? fileMeta[node.path] : undefined;
           const showMultiSelectMenu =
             selectedFiles.size > 1 && selectedFiles.has(node.path);
 
@@ -421,6 +659,15 @@ export function FileTree({
                     {node.file && getFileIcon(node.file)}
                     <span className="truncate flex-1">{node.name}</span>
                     <div className="flex items-center gap-1 shrink-0">
+                      {meta && (
+                        <>
+                          <LevelBadge kind="Risk" level={meta.risk} />
+                          <LevelBadge
+                            kind="Complexity"
+                            level={meta.complexity}
+                          />
+                        </>
+                      )}
                       {pendingCount > 0 && (
                         <span className="flex items-center gap-0.5 text-xs text-yellow-500 bg-yellow-500/20 px-1.5 py-0.5 rounded">
                           {pendingCount}
