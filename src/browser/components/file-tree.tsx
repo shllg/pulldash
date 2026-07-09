@@ -432,11 +432,25 @@ export function FileTree({
     );
   }, [flatItems, selectedFile]);
 
+  // Key the measurement cache by item identity (not index) so a dynamically
+  // measured row's size follows the item across reorders (group collapse,
+  // folder toggle, hideViewed). Memoized on flatItems so the virtualizer's
+  // measurement options don't invalidate (rebuilding every row measurement) on
+  // unrelated re-renders (file select, viewed toggle, comment-count updates).
+  const getItemKey = useCallback(
+    (index: number) => {
+      const item = flatItems[index];
+      return isGroupHeader(item) ? `group:${item.group.id}` : item.node.path;
+    },
+    [flatItems]
+  );
+
   const virtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) =>
       isGroupHeader(flatItems[index]) ? GROUP_HEADER_HEIGHT : ROW_HEIGHT,
+    getItemKey,
     overscan: 20,
   });
 
@@ -502,19 +516,20 @@ export function FileTree({
             const { group, additions, deletions, collapsed } = item;
             return (
               <div
-                key={`group:${group.id}`}
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
                 style={{
                   position: "absolute",
                   top: 0,
                   left: 0,
                   width: "100%",
-                  height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
                 <button
                   onClick={() => toggleGroup(group.id)}
-                  className="w-full h-full flex flex-col justify-center gap-0.5 px-2 py-1 text-left border-b border-border/40 bg-muted/30 hover:bg-muted/50 transition-colors"
+                  className="w-full min-h-[4rem] flex flex-col justify-center gap-0.5 px-2 py-1 text-left border-b border-border/40 bg-muted/30 hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex items-center gap-1">
                     {collapsed ? (
@@ -559,13 +574,14 @@ export function FileTree({
 
             return (
               <div
-                key={node.path}
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
                 style={{
                   position: "absolute",
                   top: 0,
                   left: 0,
                   width: "100%",
-                  height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
@@ -575,7 +591,7 @@ export function FileTree({
                       onClick={(e) => handleItemClick(item, e)}
                       className={cn(
                         "w-full flex items-center gap-1 px-2 text-sm hover:bg-muted/50 transition-colors",
-                        "text-left h-full"
+                        "text-left min-h-[1.75rem]"
                       )}
                       style={{ paddingLeft: `${depth * 12 + 8}px` }}
                     >
@@ -633,13 +649,14 @@ export function FileTree({
 
           return (
             <div
-              key={node.path}
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
               style={{
                 position: "absolute",
                 top: 0,
                 left: 0,
                 width: "100%",
-                height: `${virtualRow.size}px`,
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
@@ -649,7 +666,7 @@ export function FileTree({
                     onClick={(e) => handleItemClick(item, e)}
                     className={cn(
                       "w-full flex items-center gap-2 px-2 text-sm transition-colors",
-                      "text-left hover:bg-muted/50 h-full",
+                      "text-left hover:bg-muted/50 min-h-[1.75rem]",
                       isSelected && "bg-muted",
                       isMultiSelected && !isSelected && "bg-blue-500/20",
                       isViewed && !isMultiSelected && "opacity-60"
