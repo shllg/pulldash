@@ -232,10 +232,20 @@ export const CommandPalette = memo(function CommandPalette({
   }, [searchData, lowerQuery]);
 
   // Virtualizer for efficient rendering
+  // Key the measurement cache by filename (not index) so measured row sizes
+  // follow items as the filtered list reorders on each keystroke. Memoized on
+  // filteredFiles so the virtualizer's measurement options don't invalidate on
+  // unrelated re-renders.
+  const getItemKey = useCallback(
+    (index: number) => filteredFiles[index].filename,
+    [filteredFiles]
+  );
+
   const virtualizer = useVirtualizer({
     count: filteredFiles.length,
     getScrollElement: () => listRef.current,
     estimateSize: () => 44, // Estimated row height
+    getItemKey,
     overscan: 5,
   });
 
@@ -346,7 +356,9 @@ export const CommandPalette = memo(function CommandPalette({
                     const file = filteredFiles[virtualRow.index];
                     return (
                       <div
-                        key={file.filename}
+                        key={virtualRow.key}
+                        data-index={virtualRow.index}
+                        ref={virtualizer.measureElement}
                         style={{
                           position: "absolute",
                           top: 0,
