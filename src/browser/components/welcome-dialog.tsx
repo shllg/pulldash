@@ -15,8 +15,10 @@ import {
   Globe,
   ArrowRight,
   Clock,
+  Settings,
 } from "lucide-react";
 import { BookmarkletDialog, useShowBookmarklet } from "./bookmarklet";
+import { SettingsDialog } from "./settings-dialog";
 import {
   Dialog,
   DialogContent,
@@ -1319,6 +1321,7 @@ export function UserMenuButton({ className }: { className?: string }) {
   const currentUser = useCurrentUser()?.login ?? null;
   const showBookmarklet = useShowBookmarklet();
   const [bookmarkletOpen, setBookmarkletOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Anonymous mode - show read-only indicator with sign-in option
   if (isAnonymous && !isAuthenticated) {
@@ -1404,6 +1407,14 @@ export function UserMenuButton({ className }: { className?: string }) {
             </>
           )}
           <DropdownMenuItem
+            onClick={() => setSettingsOpen(true)}
+            className="cursor-pointer"
+          >
+            <Settings className="w-4 h-4" />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
             variant="destructive"
             onClick={logout}
             className="cursor-pointer"
@@ -1417,6 +1428,7 @@ export function UserMenuButton({ className }: { className?: string }) {
         open={bookmarkletOpen}
         onOpenChange={setBookmarkletOpen}
       />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }
