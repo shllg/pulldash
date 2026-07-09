@@ -38,17 +38,20 @@ export const ANALYSIS_JSON_SCHEMA = {
         required: ["id", "title", "description", "impact", "filenames"],
       },
     },
+    // Array, not an open-ended map: OpenAI structured-outputs strict mode
+    // rejects dictionaries (every object must list all keys in `required`).
     fileMeta: {
-      type: "object",
-      additionalProperties: {
+      type: "array",
+      items: {
         type: "object",
         additionalProperties: false,
         properties: {
+          filename: { type: "string" },
           risk: { type: "string", enum: ["low", "medium", "high"] },
           complexity: { type: "string", enum: ["low", "medium", "high"] },
           summary: { type: "string" },
         },
-        required: ["risk", "complexity", "summary"],
+        required: ["filename", "risk", "complexity", "summary"],
       },
     },
   },
@@ -80,12 +83,12 @@ ${fileList}
 
 Group these files into a small number of meaningful SEMANTIC topics (e.g. "UI", "Database",
 "API/controllers", "Build/CI", "Tests", "Docs"). Each topic gets a short plain-language
-description and an "impact" note (what a reviewer should watch for). Also produce per-file
-metadata: a risk level, a complexity level, and a one-line summary of what changed.
+description and an "impact" note (what a reviewer should watch for). Also produce "fileMeta":
+an array with one entry per changed file — { filename, risk, complexity, summary }.
 
 Rules:
 - Only reference filenames from the list above — never invent paths.
-- Every changed file should belong to exactly one group.
+- Every changed file should belong to exactly one group and have one fileMeta entry.
 - Prefer 2–6 groups; do not create a group per file.
 - "risk" and "complexity" are each exactly one of: "low", "medium", "high".
 - Keep descriptions/summaries concise (one sentence).

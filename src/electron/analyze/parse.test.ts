@@ -62,6 +62,34 @@ test("parseCodexAnalysis parses a clean payload and rolls up +/- from files", ()
   expect(analysis.fileMeta["src/db/schema.ts"].risk).toBe("high");
 });
 
+test("parseCodexAnalysis reads fileMeta as an array of {filename,...}", () => {
+  const raw = JSON.stringify({
+    groups: [
+      {
+        id: "db",
+        title: "DB",
+        description: "",
+        impact: "",
+        filenames: ["src/db/schema.ts"],
+      },
+    ],
+    fileMeta: [
+      {
+        filename: "src/db/schema.ts",
+        risk: "high",
+        complexity: "low",
+        summary: "adds table",
+      },
+      // hallucinated file in the array is ignored
+      { filename: "ghost.ts", risk: "low", complexity: "low", summary: "x" },
+    ],
+  });
+  const analysis = parseCodexAnalysis(raw, files);
+  expect(analysis.fileMeta["src/db/schema.ts"].risk).toBe("high");
+  expect(analysis.fileMeta["src/db/schema.ts"].summary).toBe("adds table");
+  expect(analysis.fileMeta["ghost.ts"]).toBeUndefined();
+});
+
 test("parseCodexAnalysis tolerates prose-wrapped, fenced output", () => {
   const raw = "Analysis complete:\n```json\n" + validPayload() + "\n```";
   const analysis = parseCodexAnalysis(raw, files);

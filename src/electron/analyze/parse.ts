@@ -117,15 +117,13 @@ export function parseCodexAnalysis(
     });
   });
 
-  // Per-file metadata, only for real files.
+  // Per-file metadata, only for real files. The wire contract is an array of
+  // { filename, risk, complexity, summary } (strict-schema compatible), but we
+  // also accept a { filename: {...} } map for tolerance.
   const fileMeta: Record<string, FileAnalysisMeta> = {};
-  const rawMeta =
-    typeof root.fileMeta === "object" && root.fileMeta !== null
-      ? (root.fileMeta as Record<string, unknown>)
-      : {};
-  for (const [filename, value] of Object.entries(rawMeta)) {
-    if (!known.has(filename)) continue;
-    if (typeof value !== "object" || value === null) continue;
+  const addMeta = (filename: unknown, value: unknown) => {
+    if (typeof filename !== "string" || !known.has(filename)) return;
+    if (typeof value !== "object" || value === null) return;
     const m = value as {
       risk?: unknown;
       complexity?: unknown;
@@ -136,6 +134,20 @@ export function parseCodexAnalysis(
       complexity: coerceLevel(m.complexity),
       summary: asString(m.summary),
     };
+  };
+
+  if (Array.isArray(root.fileMeta)) {
+    for (const item of root.fileMeta) {
+      if (typeof item === "object" && item !== null) {
+        addMeta((item as { filename?: unknown }).filename, item);
+      }
+    }
+  } else if (typeof root.fileMeta === "object" && root.fileMeta !== null) {
+    for (const [filename, value] of Object.entries(
+      root.fileMeta as Record<string, unknown>
+    )) {
+      addMeta(filename, value);
+    }
   }
 
   return { groups, fileMeta };

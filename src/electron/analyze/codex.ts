@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ANALYSIS_JSON_SCHEMA } from "./prompt";
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+// Codex reasoning over a full PR can take a couple of minutes; give large PRs
+// headroom (a real ~18-file PR measured ~80s).
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 export interface RunCodexInput {
   repoDir: string;
@@ -47,9 +49,14 @@ export async function runCodex(input: RunCodexInput): Promise<string> {
       ];
 
       input.onProgress?.("Running codex analysis…");
+      // stdin MUST be closed: codex is given the prompt as an argument, but with
+      // an open stdin it also tries to read+append stdin and blocks forever
+      // waiting for an EOF that never comes (→ the 180s timeout). stdout is
+      // ignored — the result is read from the -o file, not stdout.
       const child = spawn("codex", args, {
         cwd: input.repoDir,
         signal: input.signal,
+        stdio: ["ignore", "ignore", "pipe"],
       });
 
       let stderr = "";

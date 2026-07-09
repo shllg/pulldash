@@ -24,10 +24,11 @@ test("buildAnalysisPrompt embeds SHAs, repo, and every changed filename", () => 
   expect(prompt).toContain("2 changed file");
 });
 
-test("ANALYSIS_JSON_SCHEMA requires groups and fileMeta", () => {
+test("ANALYSIS_JSON_SCHEMA requires groups and an array fileMeta", () => {
   expect(ANALYSIS_JSON_SCHEMA.required).toEqual(["groups", "fileMeta"]);
-  expect(
-    ANALYSIS_JSON_SCHEMA.properties.fileMeta.additionalProperties.properties
-      .risk.enum
-  ).toEqual(["low", "medium", "high"]);
+  // fileMeta is an array (strict-schema compatible), not a dictionary.
+  expect(ANALYSIS_JSON_SCHEMA.properties.fileMeta.type).toBe("array");
+  const item = ANALYSIS_JSON_SCHEMA.properties.fileMeta.items;
+  expect(item.properties.risk.enum).toEqual(["low", "medium", "high"]);
+  expect(item.required).toEqual(["filename", "risk", "complexity", "summary"]);
 });
