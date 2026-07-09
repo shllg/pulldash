@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import api from "../api/api";
+import { createAnalyzeRoute } from "./analyze/route";
 
 // ============================================================================
 // Configuration
@@ -15,6 +16,21 @@ import api from "../api/api";
 // NODE_ENV is only used as a fallback for pre-ready checks
 const isDev = !app.isPackaged || process.env.NODE_ENV === "development";
 const PORT = 45678; // Fixed port for internal server
+// Loopback-only: the internal server accepts the user's GitHub token on
+// /internal/analyze, so it must never be reachable from other hosts.
+const HOST = "127.0.0.1";
+const BASE_URL = `http://${HOST}:${PORT}`;
+
+// Same-origin check for navigation guards. A prefix/startsWith test is unsafe:
+// `http://127.0.0.1:45678@evil.example/` textually starts with BASE_URL but its
+// real origin is evil.example — compare the parsed origin instead.
+function isInternalUrl(url: string): boolean {
+  try {
+    return new URL(url).origin === BASE_URL;
+  } catch {
+    return false;
+  }
+}
 
 // ============================================================================
 // Internal Server Setup
@@ -60,6 +76,15 @@ function startServer(): Promise<void> {
       // API routes first
       honoApp.route("/", api);
 
+      // Electron-only semantic-analysis endpoint (local checkout + codex).
+      // Mounted before static/SPA fallback so POST /internal/analyze is handled.
+      honoApp.route(
+        "/internal",
+        createAnalyzeRoute({
+          reposRoot: join(app.getPath("userData"), "repos"),
+        })
+      );
+
       // Static files
       honoApp.use("/*", serveStatic({ root: distDir }));
 
@@ -81,11 +106,10 @@ function startServer(): Promise<void> {
       server = serve({
         fetch: honoApp.fetch,
         port: PORT,
+        hostname: HOST,
       });
 
-      console.log(
-        `[Electron] Internal server running at http://localhost:${PORT}`
-      );
+      console.log(`[Electron] Internal server running at ${BASE_URL}`);
       resolve();
     } catch (err) {
       reject(err);
@@ -133,11 +157,11 @@ function createWindow(): void {
   });
 
   // Load the app from internal server
-  mainWindow.loadURL(`http://localhost:${PORT}`);
+  mainWindow.loadURL(BASE_URL);
 
   // Open external links in browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://localhost")) {
+    if (isInternalUrl(url)) {
       return { action: "allow" };
     }
     shell.openExternal(url);
@@ -295,7 +319,7 @@ app.on("before-quit", () => {
 app.on("web-contents-created", (_, contents) => {
   contents.on("will-navigate", (event, url) => {
     // Allow navigation within the app
-    if (!url.startsWith(`http://localhost:${PORT}`)) {
+    if (!isInternalUrl(url)) {
       event.preventDefault();
       shell.openExternal(url);
     }

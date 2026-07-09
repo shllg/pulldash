@@ -2735,6 +2735,18 @@ function createGitHubStore() {
     cache.invalidate(pattern);
   }
 
+  // Generic persistent-cache accessors for content-addressed data (e.g. the
+  // per-head-SHA semantic analysis). No TTL: the key encodes the revision, so a
+  // hit is always valid until explicitly invalidated.
+  function getPersistentCache<T>(key: string): T | null {
+    const stale = cache.getStale<T>(key, Infinity);
+    return stale ? stale.data : null;
+  }
+
+  function setPersistentCache<T>(key: string, data: T): void {
+    cache.set(key, data, true);
+  }
+
   return {
     // State
     getState,
@@ -2812,6 +2824,8 @@ function createGitHubStore() {
     deleteComment,
     getUserProfile,
     invalidateCache,
+    getPersistentCache,
+    setPersistentCache,
   };
 }
 
