@@ -33,9 +33,17 @@ export const ANALYSIS_JSON_SCHEMA = {
           title: { type: "string" },
           description: { type: "string" },
           impact: { type: "string" },
+          details: { type: "string" },
           filenames: { type: "array", items: { type: "string" } },
         },
-        required: ["id", "title", "description", "impact", "filenames"],
+        required: [
+          "id",
+          "title",
+          "description",
+          "impact",
+          "details",
+          "filenames",
+        ],
       },
     },
     // Array, not an open-ended map: OpenAI structured-outputs strict mode
@@ -83,15 +91,21 @@ ${fileList}
 
 Group these files into a small number of meaningful SEMANTIC topics (e.g. "UI", "Database",
 "API/controllers", "Build/CI", "Tests", "Docs"). Each topic gets a short plain-language
-description and an "impact" note (what a reviewer should watch for). Also produce "fileMeta":
-an array with one entry per changed file — { filename, risk, complexity, summary }.
+description, an "impact" note (what a reviewer should watch for), and a fuller "details"
+write-up. Also produce "fileMeta": an array with one entry per changed file —
+{ filename, risk, complexity, summary }.
 
 Rules:
 - Only reference filenames from the list above — never invent paths.
 - Every changed file should belong to exactly one group and have one fileMeta entry.
+- "id" is a stable lowercase semantic slug for the topic (e.g. "ui", "api", "tests",
+  "build") — pick the same id for the same kind of topic so it stays consistent across runs.
 - Prefer 2–6 groups; do not create a group per file.
 - "risk" and "complexity" are each exactly one of: "low", "medium", "high".
-- Keep descriptions/summaries concise (one sentence).
+- Keep "description", "impact", and per-file "summary" concise (one sentence each).
+- "details" is a fuller multi-sentence Markdown summary for the topic detail view, covering
+  the core changes, caveats, potential issues, and suggested fixes. Use Markdown (short
+  paragraphs or bullet lists); do not repeat the one-line description verbatim.
 
 Respond with ONLY a JSON object matching the required schema — no prose, no code fences.`;
 }

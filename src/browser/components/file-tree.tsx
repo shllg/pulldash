@@ -46,6 +46,11 @@ interface FileTreeProps {
   groupByMode?: GroupByMode;
   groups?: readonly AnalysisGroup[];
   fileMeta?: Record<string, FileAnalysisMeta>;
+  // Topic selection/viewed state (topics mode only).
+  selectedTopic?: string | null;
+  viewedTopics?: Set<string>;
+  onSelectTopic?: (groupId: string) => void;
+  onToggleTopicViewed?: (groupId: string) => void;
   onSelectFile: (filename: string) => void;
   onToggleFileSelection: (filename: string, isShiftClick: boolean) => void;
   onToggleViewed: (filename: string) => void;
@@ -89,7 +94,7 @@ function isGroupHeader(item: FlatItem): item is GroupFlatItem {
   return "group" in item;
 }
 
-const OTHER_GROUP_ID = "__other__";
+export const OTHER_GROUP_ID = "__other__";
 
 // Build the flat, virtualizable model for Topics mode: a header row per group
 // followed by its (optionally collapsed) file rows. Files not referenced by any
@@ -101,13 +106,16 @@ export function buildTopicsFlat(
   groups: readonly AnalysisGroup[],
   viewedFiles: Set<string>,
   hideViewed: boolean,
-  collapsedGroups: Set<string>
+  collapsedGroups: Set<string>,
+  viewedTopics: Set<string> = EMPTY_VIEWED_TOPICS
 ): FlatItem[] {
   const byName = new Map(files.map((f) => [f.filename, f]));
   const used = new Set<string>();
   const items: FlatItem[] = [];
 
   const pushGroup = (group: AnalysisGroup, groupFiles: PullRequestFile[]) => {
+    // Hide a topic marked viewed (mirrors file/folder hide-viewed).
+    if (hideViewed && viewedTopics.has(group.id)) return;
     const visible = hideViewed
       ? groupFiles.filter((f) => !viewedFiles.has(f.filename))
       : groupFiles;
@@ -169,6 +177,42 @@ export function buildTopicsFlat(
   }
 
   return items;
+}
+
+// Resolve the ordered PullRequestFiles for a topic id — the group's files in
+// group-member order, or (for the synthetic OTHER_GROUP_ID) every file not
+// claimed by a real group, in tree order. Pure + exported for the topic detail
+// view and data-layer testing.
+export function filesForTopic(
+  topicId: string,
+  groups: readonly AnalysisGroup[],
+  files: PullRequestFile[]
+): PullRequestFile[] {
+  const byName = new Map(files.map((f) => [f.filename, f]));
+
+  if (topicId === OTHER_GROUP_ID) {
+    const claimed = new Set<string>();
+    for (const g of groups) {
+      for (const name of g.filenames) {
+        if (byName.has(name)) claimed.add(name);
+      }
+    }
+    return sortFilesLikeTree(files.filter((f) => !claimed.has(f.filename)));
+  }
+
+  const group = groups.find((g) => g.id === topicId);
+  if (!group) return [];
+  const seen = new Set<string>();
+  const out: PullRequestFile[] = [];
+  for (const name of group.filenames) {
+    if (seen.has(name)) continue;
+    const file = byName.get(name);
+    if (file) {
+      out.push(file);
+      seen.add(name);
+    }
+  }
+  return out;
 }
 
 function buildTree(files: PullRequestFile[]): TreeNode[] {
@@ -241,8 +285,9 @@ const LEVEL_CLASS: Record<AnalysisLevel, string> = {
 };
 
 // Compact risk/complexity badge (single colored letter + tooltip). Kept tiny so
-// it fits alongside the (truncated) filename in the 256px sidebar.
-function LevelBadge({
+// it fits alongside the (truncated) filename in the 256px sidebar. Exported so
+// the topic detail view renders identical badges.
+export function LevelBadge({
   kind,
   level,
 }: {
@@ -325,6 +370,8 @@ const GROUP_HEADER_HEIGHT = 64; // Taller row for a topic group header
 // Stable fallbacks so default props don't churn the topics useMemo each render.
 const EMPTY_GROUPS: readonly AnalysisGroup[] = [];
 const EMPTY_META: Record<string, FileAnalysisMeta> = {};
+const EMPTY_VIEWED_TOPICS: Set<string> = new Set();
+const NOOP = () => {};
 
 export function FileTree({
   files,
@@ -337,6 +384,10 @@ export function FileTree({
   groupByMode = "tree",
   groups = EMPTY_GROUPS,
   fileMeta = EMPTY_META,
+  selectedTopic = null,
+  viewedTopics = EMPTY_VIEWED_TOPICS,
+  onSelectTopic = NOOP,
+  onToggleTopicViewed = NOOP,
   onSelectFile,
   onToggleFileSelection,
   onToggleViewed,
@@ -406,7 +457,8 @@ export function FileTree({
             groups,
             viewedFiles,
             hideViewed,
-            collapsedGroups
+            collapsedGroups,
+            viewedTopics
           )
         : flattenTree(filteredTree, expandedFolders),
     [
@@ -416,6 +468,7 @@ export function FileTree({
       viewedFiles,
       hideViewed,
       collapsedGroups,
+      viewedTopics,
       filteredTree,
       expandedFolders,
     ]
@@ -511,9 +564,14 @@ export function FileTree({
           const item = flatItems[virtualRow.index];
           if (!item) return null;
 
-          // Topic group header row
+          // Topic group header row. Three distinct hit targets: the chevron
+          // collapses/expands the file list, the title/summary block selects
+          // the topic (opens the detail view), and the context menu toggles
+          // viewed. Not one <button> so the targets don't nest illegally.
           if (isGroupHeader(item)) {
             const { group, additions, deletions, collapsed } = item;
+            const isTopicSelected = selectedTopic === group.id;
+            const isTopicViewed = viewedTopics.has(group.id);
             return (
               <div
                 key={virtualRow.key}
@@ -527,37 +585,77 @@ export function FileTree({
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <button
-                  onClick={() => toggleGroup(group.id)}
-                  className="w-full min-h-[4rem] flex flex-col justify-center gap-0.5 px-2 py-1 text-left border-b border-border/40 bg-muted/30 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center gap-1">
-                    {collapsed ? (
-                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    )}
-                    <span className="truncate flex-1 text-xs font-semibold">
-                      {group.title}
-                    </span>
-                    <span className="text-[10px] font-mono text-green-500 shrink-0">
-                      +{additions}
-                    </span>
-                    <span className="text-[10px] font-mono text-red-500 shrink-0">
-                      −{deletions}
-                    </span>
-                  </div>
-                  {group.description && (
-                    <span className="truncate text-[11px] text-muted-foreground pl-5">
-                      {group.description}
-                    </span>
-                  )}
-                  {group.impact && (
-                    <span className="truncate text-[11px] text-muted-foreground/80 italic pl-5">
-                      {group.impact}
-                    </span>
-                  )}
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <div
+                      className={cn(
+                        "w-full min-h-[4rem] flex items-start gap-1 px-2 py-1 border-b border-border/40 transition-colors",
+                        isTopicSelected
+                          ? "bg-muted"
+                          : "bg-muted/30 hover:bg-muted/50",
+                        isTopicViewed && "opacity-60"
+                      )}
+                    >
+                      <button
+                        onClick={() => toggleGroup(group.id)}
+                        title={collapsed ? "Expand files" : "Collapse files"}
+                        className="shrink-0 pt-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {collapsed ? (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => onSelectTopic(group.id)}
+                        className="flex-1 min-w-0 flex flex-col gap-0.5 text-left"
+                      >
+                        <span className="truncate text-xs font-semibold">
+                          {group.title}
+                        </span>
+                        {group.description && (
+                          <span className="truncate text-[11px] text-muted-foreground">
+                            {group.description}
+                          </span>
+                        )}
+                        {group.impact && (
+                          <span className="truncate text-[11px] text-muted-foreground/80 italic">
+                            {group.impact}
+                          </span>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                        <span className="text-[10px] font-mono text-green-500">
+                          +{additions}
+                        </span>
+                        <span className="text-[10px] font-mono text-red-500">
+                          −{deletions}
+                        </span>
+                        {isTopicViewed && (
+                          <Check className="w-3 h-3 text-green-500" />
+                        )}
+                      </div>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      onClick={() => onToggleTopicViewed(group.id)}
+                    >
+                      {isTopicViewed ? (
+                        <>
+                          <EyeOff className="w-4 h-4 mr-2" />
+                          Mark topic as unviewed
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-4 h-4 mr-2" />
+                          Mark topic as viewed
+                        </>
+                      )}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               </div>
             );
           }

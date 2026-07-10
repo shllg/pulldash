@@ -32,3 +32,21 @@ test("ANALYSIS_JSON_SCHEMA requires groups and an array fileMeta", () => {
   expect(item.properties.risk.enum).toEqual(["low", "medium", "high"]);
   expect(item.required).toEqual(["filename", "risk", "complexity", "summary"]);
 });
+
+test("ANALYSIS_JSON_SCHEMA group requires details (strict mode) and prompt mentions it", () => {
+  const groupItem = ANALYSIS_JSON_SCHEMA.properties.groups.items;
+  // strict mode: every property must be listed in `required`.
+  expect(groupItem.properties.details.type).toBe("string");
+  expect(groupItem.required).toContain("details");
+
+  const prompt = buildAnalysisPrompt({
+    owner: "acme",
+    repo: "widgets",
+    baseSha: "b",
+    headSha: "h",
+    files: [
+      { filename: "src/a.ts", status: "modified", additions: 1, deletions: 0 },
+    ],
+  });
+  expect(prompt).toContain("details");
+});

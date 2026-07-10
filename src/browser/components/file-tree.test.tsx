@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import type { PullRequestFile } from "@/api/types";
 import type { AnalysisGroup } from "@/browser/contexts/pr-review";
-import { buildTopicsFlat } from "./file-tree";
+import { buildTopicsFlat, filesForTopic, OTHER_GROUP_ID } from "./file-tree";
 
 function file(
   filename: string,
@@ -143,4 +143,36 @@ test("buildTopicsFlat never duplicates a file shared across group filename lists
   const paths = rows.map((i) => ("group" in i ? "" : i.node.path));
   // shared.ts claimed by group a; group b only gets only-b.ts
   expect(paths.filter((p) => p === "shared.ts")).toHaveLength(1);
+});
+
+test("buildTopicsFlat skips a viewed topic under hideViewed but keeps it otherwise", () => {
+  const files = [file("a.ts"), file("b.ts")];
+  const groups = [group("g", ["a.ts", "b.ts"])];
+
+  // hideViewed + topic marked viewed → the whole group is skipped.
+  expect(
+    buildTopicsFlat(files, groups, new Set(), true, new Set(), new Set(["g"]))
+  ).toHaveLength(0);
+
+  // hideViewed off → the viewed topic still renders (header + 2 rows).
+  expect(
+    buildTopicsFlat(files, groups, new Set(), false, new Set(), new Set(["g"]))
+  ).toHaveLength(3);
+});
+
+test("filesForTopic returns a group's files in group-member order", () => {
+  const files = [file("a.ts"), file("b.ts"), file("c.ts")];
+  const groups = [group("g", ["b.ts", "a.ts"])];
+  expect(filesForTopic("g", groups, files).map((f) => f.filename)).toEqual([
+    "b.ts",
+    "a.ts",
+  ]);
+});
+
+test("filesForTopic resolves the synthetic Other bucket to unclaimed files", () => {
+  const files = [file("src/a.ts"), file("README.md")];
+  const groups = [group("code", ["src/a.ts"])];
+  expect(
+    filesForTopic(OTHER_GROUP_ID, groups, files).map((f) => f.filename)
+  ).toEqual(["README.md"]);
 });
