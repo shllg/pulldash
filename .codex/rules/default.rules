@@ -3,9 +3,9 @@
 # .claude/rules/19-git-and-autonomy.md.
 
 # --- deploy floor: deny pushes and remote-mutating git outright ---
-prefix_rule(pattern=["git", "push"], decision="deny")
-prefix_rule(pattern=["git", "reset", "--hard"], decision="deny")
-prefix_rule(pattern=["sudo"], decision="deny")
+prefix_rule(pattern=["git", "push"], decision="forbidden")
+prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden")
+prefix_rule(pattern=["sudo"], decision="forbidden")
 
 # --- read-only git ---
 prefix_rule(pattern=["git", "status"], decision="allow")
